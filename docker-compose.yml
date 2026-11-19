@@ -1,0 +1,21 @@
+services:
+  sql-analyst-agent:
+    build: .
+    container_name: sql-analyst-agent
+    ports:
+      - "8000:8000"
+    environment:
+      - AGENT_PROVIDER=${AGENT_PROVIDER:-local}
+      - AGENT_MODEL=${AGENT_MODEL:-deterministic-bilingual-v1}
+      - AGENT_OLLAMA_BASE_URL=${AGENT_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - AGENT_GEMINI_API_KEY=${AGENT_GEMINI_API_KEY:-}
+      - AGENT_OPENAI_API_KEY=${AGENT_OPENAI_API_KEY:-}
+      - AGENT_MAX_RETRIES=${AGENT_MAX_RETRIES:-3}
+      - AGENT_MAX_ROWS=${AGENT_MAX_ROWS:-200}
+      - AGENT_QUERY_TIMEOUT_SEC=${AGENT_QUERY_TIMEOUT_SEC:-5.0}
+    volumes:
+      - analytics_data:/app/data
+    restart: unless-stopped
+
+volumes:
+  analytics_data:

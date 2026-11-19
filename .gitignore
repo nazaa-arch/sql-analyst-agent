@@ -1,0 +1,30 @@
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Test & linter caches
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local environment & generated runtime DBs
+.env
+.venv/
+venv/
+data/*.db
+data/*.db-wal
+data/*.db-shm
+*.sqlite
+*.sqlite3
+
+# IDE & OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

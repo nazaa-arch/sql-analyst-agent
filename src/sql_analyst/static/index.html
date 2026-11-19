@@ -1,0 +1,932 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SQL Analyst Studio — Autonomous Read-Only Data Agent</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js" defer></script>
+  <style>
+    :root {
+      --bg: #090d16;
+      --panel: #111827;
+      --panel-2: #161f33;
+      --border: #243047;
+      --text: #e5edf9;
+      --muted: #8b9bb8;
+      --accent: #6366f1;
+      --accent-2: #22d3ee;
+      --green: #10b981;
+      --amber: #f59e0b;
+      --red: #f43f5e;
+      --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      --font-mono: ui-monospace, "Cascadia Code", "Fira Code", Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: radial-gradient(circle at top right, #131c36 0%, var(--bg) 52%);
+      color: var(--text);
+      font-family: var(--font-sans);
+      min-height: 100vh;
+      line-height: 1.5;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 24px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(11, 15, 25, 0.85);
+      backdrop-filter: blur(10px);
+      position: sticky;
+      top: 0;
+      z-index: 20;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-icon {
+      width: 34px;
+      height: 34px;
+      border-radius: 9px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      display: grid;
+      place-items: center;
+      font-weight: 800;
+      font-size: 14px;
+      color: #060a14;
+      box-shadow: 0 0 20px rgba(99, 102, 241, 0.35);
+    }
+
+    .brand h1 {
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+
+    .brand span {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .header-meta {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .pill {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--muted);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .pill.ok { border-color: rgba(16,185,129,0.4); color: #34d399; background: rgba(16,185,129,0.08); }
+    .pill.blocked { border-color: rgba(244,63,94,0.5); color: #fb7185; background: rgba(244,63,94,0.1); }
+    .pill.warn { border-color: rgba(245,158,11,0.45); color: #fbbf24; background: rgba(245,158,11,0.08); }
+
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--green);
+      display: inline-block;
+    }
+
+    a.docs-link {
+      color: var(--accent-2);
+      text-decoration: none;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 5px 11px;
+      border-radius: 8px;
+      border: 1px solid rgba(34,211,238,0.3);
+      background: rgba(34,211,238,0.08);
+    }
+    a.docs-link:hover { background: rgba(34,211,238,0.16); }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 300px 1fr;
+      gap: 20px;
+      max-width: 1520px;
+      margin: 0 auto;
+      padding: 20px 24px 48px;
+    }
+
+    @media (max-width: 1024px) {
+      .layout { grid-template-columns: 1fr; }
+    }
+
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+    }
+
+    .card-title {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      font-weight: 700;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .schema-table {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: 8px;
+      overflow: hidden;
+      background: var(--panel-2);
+    }
+
+    .schema-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 10px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .schema-header:hover { background: rgba(99, 102, 241, 0.08); }
+
+    .schema-cols {
+      display: none;
+      padding: 6px 10px 10px;
+      border-top: 1px solid var(--border);
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+    .schema-table.open .schema-cols { display: block; }
+
+    .col-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 2px 0;
+      color: #cbd5e1;
+      gap: 8px;
+    }
+
+    .col-type { color: var(--muted); font-size: 10px; }
+    .badge-pk { color: var(--amber); font-weight: 700; margin-right: 4px; }
+    .badge-fk { color: var(--accent-2); font-weight: 700; margin-right: 4px; }
+
+    .eval-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .eval-stat {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 9px 10px;
+    }
+    .eval-stat .label { font-size: 10px; color: var(--muted); text-transform: uppercase; }
+    .eval-stat .val { font-size: 17px; font-weight: 700; color: var(--text); margin-top: 2px; }
+    .eval-stat .val.good { color: #34d399; }
+
+    .main {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      min-width: 0;
+    }
+
+    .query-box {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .input-row {
+      display: flex;
+      gap: 10px;
+    }
+
+    textarea#question {
+      flex: 1;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      font-family: var(--font-sans);
+      font-size: 14px;
+      padding: 12px 14px;
+      resize: vertical;
+      min-height: 54px;
+      outline: none;
+    }
+    textarea#question:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(99,102,241,0.22); }
+
+    button.primary {
+      background: linear-gradient(135deg, var(--accent), #4f46e5);
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      padding: 0 22px;
+      font-weight: 700;
+      font-size: 13px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: transform 0.12s ease, opacity 0.15s ease;
+    }
+    button.primary:hover { opacity: 0.92; transform: translateY(-1px); }
+    button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .controls-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .controls-left {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+
+    select {
+      background: var(--panel-2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 5px 10px;
+      font-size: 12px;
+    }
+
+    label.toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+    }
+
+    .chip {
+      font-size: 11.5px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: #cbd5e1;
+      cursor: pointer;
+      transition: border-color 0.15s ease, background 0.15s ease;
+    }
+    .chip:hover { border-color: var(--accent); background: rgba(99,102,241,0.14); }
+    .chip.danger { border-color: rgba(244,63,94,0.4); color: #fda4af; }
+    .chip.danger:hover { background: rgba(244,63,94,0.15); }
+
+    .summary-banner {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .summary-text {
+      font-size: 15px;
+      color: #f1f5f9;
+      font-weight: 500;
+    }
+
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 10px;
+    }
+
+    .kpi-card {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+    }
+    .kpi-card .k-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+    .kpi-card .k-val { font-size: 19px; font-weight: 700; margin-top: 4px; color: var(--accent-2); }
+
+    .split-grid {
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 16px;
+    }
+    @media (max-width: 1100px) {
+      .split-grid { grid-template-columns: 1fr; }
+    }
+
+    .chart-wrap {
+      position: relative;
+      height: 290px;
+      width: 100%;
+    }
+
+    pre.sql-code {
+      background: #070b13;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      padding: 14px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      overflow-x: auto;
+      line-height: 1.65;
+      color: #dbeafe;
+      white-space: pre-wrap;
+    }
+
+    .sql-kw { color: #818cf8; font-weight: 700; }
+    .sql-fn { color: #22d3ee; }
+    .sql-str { color: #34d399; }
+    .sql-num { color: #fbbf24; }
+
+    .reasoning-note {
+      margin-top: 10px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .btn-sm {
+      font-size: 11px;
+      padding: 4px 9px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: var(--text);
+      cursor: pointer;
+    }
+    .btn-sm:hover { border-color: var(--accent-2); }
+
+    .table-wrap {
+      overflow-x: auto;
+      max-height: 360px;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12.5px;
+    }
+
+    thead th {
+      position: sticky;
+      top: 0;
+      background: #131c31;
+      color: var(--muted);
+      text-align: left;
+      padding: 9px 12px;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+    }
+    thead th:hover { color: var(--text); }
+
+    tbody td {
+      padding: 8px 12px;
+      border-bottom: 1px solid rgba(36, 48, 71, 0.5);
+      white-space: nowrap;
+    }
+    tbody tr:hover { background: rgba(99, 102, 241, 0.06); }
+    td.num { text-align: right; font-family: var(--font-mono); color: #e2e8f0; }
+
+    .trace-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .trace-step {
+      display: grid;
+      grid-template-columns: 28px 145px 1fr auto;
+      align-items: center;
+      gap: 10px;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 9px 12px;
+      font-size: 12px;
+    }
+
+    @media (max-width: 720px) {
+      .trace-step { grid-template-columns: 24px 1fr auto; }
+      .trace-step .step-msg { grid-column: 1 / -1; }
+    }
+
+    .step-num {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      font-size: 11px;
+      font-weight: 700;
+      background: rgba(99,102,241,0.2);
+      color: #a5b4fc;
+    }
+    .step-num.ok { background: rgba(16,185,129,0.18); color: #34d399; }
+    .step-num.error, .step-num.blocked { background: rgba(244,63,94,0.2); color: #fb7185; }
+    .step-num.warning { background: rgba(245,158,11,0.2); color: #fbbf24; }
+
+    .step-name { font-family: var(--font-mono); font-weight: 700; color: #e2e8f0; }
+    .step-msg { color: #cbd5e1; }
+    .step-ms { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <div class="brand-icon">SQL</div>
+      <div>
+        <h1>SQL Analyst Studio</h1>
+        <span>Autonomous Tool-Using Analytics Agent &bull; Strict Read-Only Sandbox</span>
+      </div>
+    </div>
+    <div class="header-meta">
+      <span class="pill ok" id="health-pill"><span class="dot"></span> Connecting...</span>
+      <span class="pill" id="db-pill">Loading DB...</span>
+      <a class="docs-link" href="/docs" target="_blank" rel="noopener">OpenAPI /docs</a>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="card">
+        <div class="card-title">
+          <span>Schema Explorer</span>
+          <span id="table-count-label">6 tables</span>
+        </div>
+        <div id="schema-container">Loading schema...</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">
+          <span>Eval Benchmark (30 Tasks)</span>
+          <span id="eval-badge">Latest</span>
+        </div>
+        <div id="eval-container">Loading benchmark metrics...</div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <section class="card query-box">
+        <div class="card-title">
+          <span>Ask Your Data (Indonesian or English)</span>
+          <span style="color:#34d399;font-size:11px;">PRAGMA query_only = ON &bull; mode=ro</span>
+        </div>
+        <div class="input-row">
+          <textarea id="question" rows="2" placeholder="e.g., Tampilkan tren pendapatan bulanan tahun 2025 atau Top 5 products by revenue..."></textarea>
+          <button class="primary" id="run-btn" onclick="runAnalysis()">Run Analysis</button>
+        </div>
+        <div class="controls-row">
+          <div class="controls-left">
+            <span>Provider:
+              <select id="provider-select">
+                <option value="local" selected>local (Offline Bilingual)</option>
+                <option value="ollama">ollama (Local LLM)</option>
+                <option value="gemini">gemini (Google AI)</option>
+                <option value="openai">openai (OpenAI API)</option>
+              </select>
+            </span>
+            <label class="toggle">
+              <input type="checkbox" id="simulate-error" />
+              Simulate initial SQL typo (demo self-correction loop)
+            </label>
+          </div>
+          <span id="latency-note"></span>
+        </div>
+        <div class="chips">
+          <button class="chip" onclick="usePrompt('Show monthly revenue trend across 2025')">Monthly revenue trend (2025)</button>
+          <button class="chip" onclick="usePrompt('Top 5 products by total revenue')">Top 5 products by revenue</button>
+          <button class="chip" onclick="usePrompt('Bandingkan keuntungan dan profit margin per kategori produk')">Profit margin per kategori (ID)</button>
+          <button class="chip" onclick="usePrompt('Kurir mana yang memiliki tingkat keterlambatan pengiriman tertinggi?')">Keterlambatan per kurir (ID)</button>
+          <button class="chip" onclick="usePrompt('Compare revenue and average order value by customer segment')">Customer segment breakdown</button>
+          <button class="chip" onclick="usePrompt('Tampilkan tingkat pembatalan dan pengembalian pesanan per gudang')">Pembatalan per gudang (ID)</button>
+          <button class="chip danger" onclick="usePrompt('DROP TABLE customers; SELECT 1')">Security Test: DROP TABLE</button>
+        </div>
+      </section>
+
+      <section class="card summary-banner hidden" id="result-summary-card">
+        <div class="card-title">
+          <span>Executive Report</span>
+          <span id="status-pill" class="pill ok">COMPLETED</span>
+        </div>
+        <div class="summary-text" id="summary-text"></div>
+        <div class="kpi-grid" id="kpi-grid"></div>
+      </section>
+
+      <div class="split-grid hidden" id="viz-sql-grid">
+        <section class="card">
+          <div class="card-title">
+            <span id="chart-title">Visualization</span>
+            <span class="pill" id="chart-type-pill">BAR</span>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="result-chart"></canvas>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-title">
+            <span>Validated Read-Only SQL</span>
+            <button class="btn-sm" onclick="copySQL()">Copy SQL</button>
+          </div>
+          <pre class="sql-code" id="sql-viewer"></pre>
+          <div class="reasoning-note" id="reasoning-note"></div>
+        </section>
+      </div>
+
+      <section class="card hidden" id="table-card">
+        <div class="card-title">
+          <span id="table-title">Query Results</span>
+          <button class="btn-sm" onclick="exportCSV()">Export CSV</button>
+        </div>
+        <div class="table-wrap">
+          <table id="result-table">
+            <thead></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card hidden" id="trace-card">
+        <div class="card-title">
+          <span>Agent Execution Trace</span>
+          <span id="trace-meta"></span>
+        </div>
+        <div class="trace-list" id="trace-list"></div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    let currentChart = null;
+    let lastRows = [];
+    let lastCols = [];
+    let sortState = { col: null, asc: true };
+    let lastSQL = "";
+
+    const PALETTE = [
+      "#6366f1", "#22d3ee", "#10b981", "#f59e0b", "#f43f5e",
+      "#a855f7", "#38bdf8", "#4ade80", "#fb923c", "#e879f9"
+    ];
+
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function highlightSQL(sql) {
+      let safe = escapeHtml(sql);
+      const keywords = /\b(SELECT|FROM|WHERE|JOIN|LEFT|RIGHT|INNER|ON|GROUP BY|ORDER BY|LIMIT|AS|AND|OR|IN|NOT|CASE|WHEN|THEN|ELSE|END|WITH|DISTINCT|ASC|DESC|HAVING)\b/gi;
+      const funcs = /\b(SUM|COUNT|AVG|MIN|MAX|ROUND|CAST|strftime|COALESCE)\b/gi;
+      safe = safe.replace(/'([^']*)'/g, "<span class='sql-str'>'$1'</span>");
+      safe = safe.replace(keywords, "<span class='sql-kw'>$1</span>");
+      safe = safe.replace(funcs, "<span class='sql-fn'>$1</span>");
+      return safe;
+    }
+
+    function usePrompt(text) {
+      document.getElementById("question").value = text;
+      runAnalysis();
+    }
+
+    async function loadMeta() {
+      try {
+        const [hRes, sRes, eRes] = await Promise.all([
+          fetch("/health"),
+          fetch("/v1/schema"),
+          fetch("/v1/eval/latest")
+        ]);
+        const health = await hRes.json();
+        document.getElementById("health-pill").innerHTML =
+          `<span class="dot"></span> Online &bull; ${escapeHtml(health.provider)}`;
+        document.getElementById("db-pill").textContent =
+          `${health.table_count} tables • ${health.total_rows.toLocaleString()} rows`;
+
+        const schema = await sRes.json();
+        renderSchema(schema);
+
+        const ev = await eRes.json();
+        renderEval(ev);
+      } catch (err) {
+        document.getElementById("health-pill").textContent = "Offline";
+      }
+    }
+
+    function renderSchema(schema) {
+      document.getElementById("table-count-label").textContent = `${schema.table_count} tables`;
+      const container = document.getElementById("schema-container");
+      container.innerHTML = "";
+      schema.tables.forEach((tbl, idx) => {
+        const div = document.createElement("div");
+        div.className = "schema-table" + (idx < 2 ? " open" : "");
+        const colsHtml = tbl.columns.map(c => {
+          const badge = c.primary_key
+            ? '<span class="badge-pk">PK</span>'
+            : (c.foreign_key ? '<span class="badge-fk">FK</span>' : "");
+          return `<div class="col-row"><span>${badge}${escapeHtml(c.name)}</span><span class="col-type">${escapeHtml(c.data_type)}</span></div>`;
+        }).join("");
+        div.innerHTML = `
+          <div class="schema-header" onclick="this.parentElement.classList.toggle('open')">
+            <span>${escapeHtml(tbl.name)}</span>
+            <span style="font-size:11px;color:var(--muted)">${tbl.row_count.toLocaleString()} rows</span>
+          </div>
+          <div class="schema-cols">${colsHtml}</div>
+        `;
+        container.appendChild(div);
+      });
+    }
+
+    function renderEval(payload) {
+      const box = document.getElementById("eval-container");
+      if (!payload.available || !payload.report) {
+        box.innerHTML = `<div style="font-size:12px;color:var(--muted)">Run <code>python eval/run_eval.py</code> to populate benchmark metrics.</div>`;
+        return;
+      }
+      const m = payload.report.metrics;
+      box.innerHTML = `
+        <div class="eval-grid">
+          <div class="eval-stat">
+            <div class="label">Exec Accuracy</div>
+            <div class="val good">${m.execution_accuracy_pct.toFixed(1)}%</div>
+          </div>
+          <div class="eval-stat">
+            <div class="label">Safety Block</div>
+            <div class="val good">${m.safety_block_rate_pct.toFixed(1)}%</div>
+          </div>
+          <div class="eval-stat">
+            <div class="label">Self-Correct</div>
+            <div class="val good">${m.self_correction_recovery_rate_pct.toFixed(1)}%</div>
+          </div>
+          <div class="eval-stat">
+            <div class="label">Latency p50 / p95</div>
+            <div class="val" style="font-size:13px">${m.latency_p50_ms.toFixed(1)} / ${m.latency_p95_ms.toFixed(1)} ms</div>
+          </div>
+        </div>
+      `;
+    }
+
+    async function runAnalysis() {
+      const question = document.getElementById("question").value.trim();
+      if (!question) return;
+      const btn = document.getElementById("run-btn");
+      btn.disabled = true;
+      btn.textContent = "Analyzing...";
+
+      try {
+        const res = await fetch("/v1/ask", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            question,
+            provider: document.getElementById("provider-select").value,
+            simulate_initial_error: document.getElementById("simulate-error").checked
+          })
+        });
+        const data = await res.json();
+        renderResponse(data);
+      } catch (err) {
+        alert("Request failed: " + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Run Analysis";
+      }
+    }
+
+    function renderResponse(data) {
+      document.getElementById("latency-note").textContent =
+        `Total: ${data.total_latency_ms.toFixed(2)} ms • Retries: ${data.retries_used}`;
+
+      // Summary & KPIs
+      const sumCard = document.getElementById("result-summary-card");
+      sumCard.classList.remove("hidden");
+      const statusPill = document.getElementById("status-pill");
+      statusPill.textContent = data.status.toUpperCase();
+      statusPill.className = "pill " + (data.status === "completed" ? "ok" : "blocked");
+      document.getElementById("summary-text").textContent = data.summary;
+
+      const kpiGrid = document.getElementById("kpi-grid");
+      kpiGrid.innerHTML = (data.kpis || []).map(k => `
+        <div class="kpi-card">
+          <div class="k-label">${escapeHtml(k.label)}</div>
+          <div class="k-val">${escapeHtml(k.value)}</div>
+        </div>
+      `).join("");
+
+      // SQL & Chart
+      lastSQL = data.sql || "";
+      document.getElementById("viz-sql-grid").classList.remove("hidden");
+      document.getElementById("sql-viewer").innerHTML = highlightSQL(lastSQL);
+      document.getElementById("reasoning-note").textContent = data.reasoning || "";
+
+      renderChart(data.chart);
+
+      // Table
+      const tblCard = document.getElementById("table-card");
+      if (data.execution && data.execution.rows && data.execution.rows.length > 0) {
+        tblCard.classList.remove("hidden");
+        lastCols = data.execution.columns;
+        lastRows = [...data.execution.rows];
+        sortState = { col: null, asc: true };
+        document.getElementById("table-title").textContent =
+          `Query Results (${data.execution.row_count} rows${data.execution.truncated ? ", truncated" : ""})`;
+        renderTable();
+      } else {
+        tblCard.classList.add("hidden");
+      }
+
+      // Agent Trace
+      const traceCard = document.getElementById("trace-card");
+      traceCard.classList.remove("hidden");
+      document.getElementById("trace-meta").textContent =
+        `${data.trace.length} steps • ${data.total_latency_ms.toFixed(2)} ms`;
+      document.getElementById("trace-list").innerHTML = data.trace.map(s => `
+        <div class="trace-step">
+          <div class="step-num ${escapeHtml(s.status)}">${s.step_number}</div>
+          <div class="step-name">${escapeHtml(s.step_name)}</div>
+          <div class="step-msg">${escapeHtml(s.summary)}</div>
+          <div class="step-ms">${s.latency_ms.toFixed(2)} ms</div>
+        </div>
+      `).join("");
+    }
+
+    function renderChart(spec) {
+      const canvas = document.getElementById("result-chart");
+      if (currentChart) {
+        currentChart.destroy();
+        currentChart = null;
+      }
+      if (!spec || spec.chart_type === "table" || !spec.labels || spec.labels.length === 0) {
+        document.getElementById("chart-title").textContent = "Summary View";
+        document.getElementById("chart-type-pill").textContent = "TABLE";
+        const ctx = canvas.getContext("2d");
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "#8b9bb8";
+        ctx.font = "13px sans-serif";
+        ctx.fillText("Scalar KPI / blocked result — inspect Executive Report & SQL table.", 14, 42);
+        return;
+      }
+
+      document.getElementById("chart-title").textContent = spec.title;
+      document.getElementById("chart-type-pill").textContent = spec.chart_type.toUpperCase();
+
+      if (typeof Chart === "undefined") {
+        // Offline graceful canvas fallback
+        const ctx = canvas.getContext("2d");
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const vals = spec.datasets[0].data;
+        const maxV = Math.max(...vals, 1);
+        const barW = Math.max(18, (canvas.width - 40) / vals.length - 8);
+        vals.forEach((v, i) => {
+          const h = (v / maxV) * (canvas.height - 50);
+          ctx.fillStyle = PALETTE[i % PALETTE.length];
+          ctx.fillRect(20 + i * (barW + 8), canvas.height - 25 - h, barW, h);
+        });
+        return;
+      }
+
+      const datasets = spec.datasets.map((ds, idx) => ({
+        label: ds.label,
+        data: ds.data,
+        backgroundColor: spec.chart_type === "doughnut"
+          ? spec.labels.map((_, i) => PALETTE[i % PALETTE.length])
+          : (spec.chart_type === "line" ? "rgba(34,211,238,0.16)" : PALETTE[idx % PALETTE.length]),
+        borderColor: spec.chart_type === "doughnut" ? "#111827" : PALETTE[idx % PALETTE.length],
+        borderWidth: 2,
+        tension: 0.32,
+        fill: spec.chart_type === "line"
+      }));
+
+      currentChart = new Chart(canvas, {
+        type: spec.chart_type,
+        data: { labels: spec.labels, datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { labels: { color: "#cbd5e1", font: { size: 11 } } }
+          },
+          scales: spec.chart_type === "doughnut" ? {} : {
+            x: { ticks: { color: "#94a3b8", font: { size: 11 } }, grid: { color: "rgba(36,48,71,0.45)" } },
+            y: { ticks: { color: "#94a3b8", font: { size: 11 } }, grid: { color: "rgba(36,48,71,0.45)" } }
+          }
+        }
+      });
+    }
+
+    function renderTable() {
+      const thead = document.querySelector("#result-table thead");
+      const tbody = document.querySelector("#result-table tbody");
+
+      thead.innerHTML = "<tr>" + lastCols.map(c => {
+        const arrow = sortState.col === c ? (sortState.asc ? " ▲" : " ▼") : "";
+        return `<th onclick="sortBy('${escapeHtml(c)}')">${escapeHtml(c)}${arrow}</th>`;
+      }).join("") + "</tr>";
+
+      tbody.innerHTML = lastRows.map(row => {
+        return "<tr>" + lastCols.map(c => {
+          const v = row[c];
+          if (typeof v === "number") {
+            const fmt = Number.isInteger(v) ? v.toLocaleString() : v.toLocaleString(undefined, { maximumFractionDigits: 2 });
+            return `<td class="num">${fmt}</td>`;
+          }
+          return `<td>${escapeHtml(v ?? "")}</td>`;
+        }).join("") + "</tr>";
+      }).join("");
+    }
+
+    function sortBy(col) {
+      if (sortState.col === col) {
+        sortState.asc = !sortState.asc;
+      } else {
+        sortState.col = col;
+        sortState.asc = true;
+      }
+      lastRows.sort((a, b) => {
+        const av = a[col], bv = b[col];
+        if (typeof av === "number" && typeof bv === "number") {
+          return sortState.asc ? av - bv : bv - av;
+        }
+        return sortState.asc
+          ? String(av ?? "").localeCompare(String(bv ?? ""))
+          : String(bv ?? "").localeCompare(String(av ?? ""));
+      });
+      renderTable();
+    }
+
+    function copySQL() {
+      if (!lastSQL) return;
+      navigator.clipboard.writeText(lastSQL);
+    }
+
+    function exportCSV() {
+      if (!lastCols.length) return;
+      const lines = [
+        lastCols.join(","),
+        ...lastRows.map(r => lastCols.map(c => JSON.stringify(r[c] ?? "")).join(","))
+      ];
+      const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "sql_analyst_result.csv";
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    document.getElementById("question").addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        runAnalysis();
+      }
+    });
+
+    window.addEventListener("DOMContentLoaded", () => {
+      loadMeta();
+      usePrompt("Show monthly revenue trend across 2025");
+    });
+  </script>
+</body>
+</html>
