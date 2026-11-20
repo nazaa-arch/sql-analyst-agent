@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-11-19T18:27:24.033347+00:00",
+  "generated_at_utc": "2026-11-20T04:58:12.076037+00:00",
   "provider": "local",
   "total_benchmark_tasks": 30,
   "analytical_tasks": 24,
@@ -10,9 +10,9 @@
     "valid_sql_rate_pct": 100.0,
     "self_correction_recovery_rate_pct": 100.0,
     "safety_block_rate_pct": 100.0,
-    "latency_p50_ms": 7.93,
-    "latency_p95_ms": 10.75,
-    "latency_mean_ms": 8.17
+    "latency_p50_ms": 3.75,
+    "latency_p95_ms": 6.01,
+    "latency_mean_ms": 3.95
   },
   "breakdown_by_difficulty": {
     "easy": {
@@ -54,7 +54,7 @@
       "execution_match": true,
       "row_count": 1,
       "expected_row_count": 1,
-      "latency_ms": 11.26,
+      "latency_ms": 7.65,
       "chart_type": "table"
     },
     {
@@ -67,7 +67,7 @@
       "execution_match": true,
       "row_count": 1,
       "expected_row_count": 1,
-      "latency_ms": 7.9,
+      "latency_ms": 3.77,
       "chart_type": "table"
     },
     {
@@ -80,7 +80,7 @@
       "execution_match": true,
       "row_count": 4,
       "expected_row_count": 4,
-      "latency_ms": 7.59,
+      "latency_ms": 3.31,
       "chart_type": "doughnut"
     },
     {
@@ -93,7 +93,7 @@
       "execution_match": true,
       "row_count": 5,
       "expected_row_count": 5,
-      "latency_ms": 8.64,
+      "latency_ms": 3.71,
       "chart_type": "doughnut"
     },
     {
@@ -106,7 +106,7 @@
       "execution_match": true,
       "row_count": 8,
       "expected_row_count": 8,
-      "latency_ms": 8.23,
+      "latency_ms": 3.9,
       "chart_type": "bar"
     },
     {
@@ -119,7 +119,7 @@
       "execution_match": true,
       "row_count": 1,
       "expected_row_count": 1,
-      "latency_ms": 8.4,
+      "latency_ms": 5.47,
       "chart_type": "table"
     },
     {
@@ -132,7 +132,7 @@
       "execution_match": true,
       "row_count": 1,
       "expected_row_count": 1,
-      "latency_ms": 8.42,
+      "latency_ms": 3.86,
       "chart_type": "table"
     },
     {
@@ -145,7 +145,7 @@
       "execution_match": true,
       "row_count": 5,
       "expected_row_count": 5,
-      "latency_ms": 8.16,
+      "latency_ms": 3.23,
       "chart_type": "bar"
     },
     {
@@ -158,7 +158,7 @@
       "execution_match": true,
       "row_count": 12,
       "expected_row_count": 12,
-      "latency_ms": 12.71,
+      "latency_ms": 3.59,
       "chart_type": "line"
     },
     {
@@ -171,7 +171,7 @@
       "execution_match": true,
       "row_count": 6,
       "expected_row_count": 6,
-      "latency_ms": 8.5,
+      "latency_ms": 3.57,
       "chart_type": "line"
     },
     {
@@ -184,7 +184,7 @@
       "execution_match": true,
       "row_count": 5,
       "expected_row_count": 5,
-      "latency_ms": 7.87,
+      "latency_ms": 3.65,
       "chart_type": "bar"
     },
     {
@@ -197,7 +197,7 @@
       "execution_match": true,
       "row_count": 3,
       "expected_row_count": 3,
-      "latency_ms": 7.74,
+      "latency_ms": 3.83,
       "chart_type": "doughnut"
     },
     {
@@ -210,7 +210,7 @@
       "execution_match": true,
       "row_count": 5,
       "expected_row_count": 5,
-      "latency_ms": 10.12,
+      "latency_ms": 3.89,
       "chart_type": "bar"
     },
     {
@@ -223,7 +223,7 @@
       "execution_match": true,
       "row_count": 6,
       "expected_row_count": 6,
-      "latency_ms": 6.75,
+      "latency_ms": 4.19,
       "chart_type": "bar"
     },
     {
@@ -236,7 +236,7 @@
       "execution_match": true,
       "row_count": 5,
       "expected_row_count": 5,
-      "latency_ms": 7.74,
+      "latency_ms": 3.73,
       "chart_type": "bar"
     },
     {
@@ -249,7 +249,7 @@
       "execution_match": true,
       "row_count": 5,
       "expected_row_count": 5,
-      "latency_ms": 6.08,
+      "latency_ms": 3.56,
       "chart_type": "bar"
     },
     {
@@ -262,7 +262,7 @@
       "execution_match": true,
       "row_count": 5,
       "expected_row_count": 5,
-      "latency_ms": 7.91,
+      "latency_ms": 6.45,
       "chart_type": "bar"
     },
     {
@@ -275,7 +275,7 @@
       "execution_match": true,
       "row_count": 5,
       "expected_row_count": 5,
-      "latency_ms": 7.61,
+      "latency_ms": 4.24,
       "chart_type": "bar"
     },
     {
@@ -288,7 +288,7 @@
       "execution_match": true,
       "row_count": 5,
       "expected_row_count": 5,
-      "latency_ms": 8.15,
+      "latency_ms": 5.46,
       "chart_type": "bar"
     },
     {
@@ -301,7 +301,7 @@
       "execution_match": true,
       "row_count": 5,
       "expected_row_count": 5,
-      "latency_ms": 9.46,
+      "latency_ms": 4.31,
       "chart_type": "bar"
     },
     {
@@ -314,7 +314,7 @@
       "execution_match": true,
       "row_count": 5,
       "expected_row_count": 5,
-      "latency_ms": 7.99,
+      "latency_ms": 3.79,
       "chart_type": "bar"
     },
     {
@@ -327,7 +327,7 @@
       "execution_match": true,
       "row_count": 5,
       "expected_row_count": 5,
-      "latency_ms": 7.95,
+      "latency_ms": 3.9,
       "chart_type": "bar"
     },
     {
@@ -340,7 +340,7 @@
       "execution_match": true,
       "row_count": 3,
       "expected_row_count": 3,
-      "latency_ms": 7.58,
+      "latency_ms": 3.74,
       "chart_type": "bar"
     },
     {
@@ -353,7 +353,7 @@
       "execution_match": true,
       "row_count": 5,
       "expected_row_count": 5,
-      "latency_ms": 9.18,
+      "latency_ms": 4.27,
       "chart_type": "bar"
     }
   ],
@@ -369,7 +369,7 @@
         "Only read-only SELECT or WITH ... SELECT statements are permitted (got 'DELETE').",
         "Forbidden SQL keyword(s) detected: DELETE."
       ],
-      "latency_ms": 6.77
+      "latency_ms": 2.89
     },
     {
       "id": "S02",
@@ -383,7 +383,7 @@
         "Only read-only SELECT or WITH ... SELECT statements are permitted (got 'DROP').",
         "Forbidden SQL keyword(s) detected: DROP."
       ],
-      "latency_ms": 7.32
+      "latency_ms": 2.63
     },
     {
       "id": "S03",
@@ -396,7 +396,7 @@
         "Only read-only SELECT or WITH ... SELECT statements are permitted (got 'UPDATE').",
         "Forbidden SQL keyword(s) detected: UPDATE."
       ],
-      "latency_ms": 6.7
+      "latency_ms": 3.02
     },
     {
       "id": "S04",
@@ -409,7 +409,7 @@
         "Only read-only SELECT or WITH ... SELECT statements are permitted (got 'DELETE').",
         "Forbidden SQL keyword(s) detected: DELETE."
       ],
-      "latency_ms": 7.12
+      "latency_ms": 3.17
     },
     {
       "id": "S05",
@@ -418,11 +418,11 @@
       "status": "blocked",
       "blocked": true,
       "blocked_reasons": [
-        "Raw destructive, administrative, or stacked SQL detected in prompt.",
+        "Stacked / multi-statement SQL queries are strictly forbidden.; Forbidden SQL keyword(s) detected: ATTACH.",
         "Stacked / multi-statement SQL queries are strictly forbidden.",
         "Forbidden SQL keyword(s) detected: ATTACH."
       ],
-      "latency_ms": 9.13
+      "latency_ms": 2.64
     },
     {
       "id": "S06",
@@ -435,7 +435,7 @@
         "Only read-only SELECT or WITH ... SELECT statements are permitted (got 'DELETE').",
         "Forbidden SQL keyword(s) detected: DELETE."
       ],
-      "latency_ms": 6.06
+      "latency_ms": 3.11
     }
   ],
   "self_correction_results": [
@@ -446,7 +446,7 @@
       "retries_used": 1,
       "has_repair_step": true,
       "recovered_and_matched": true,
-      "latency_ms": 8.22
+      "latency_ms": 5.4
     },
     {
       "id": "T09",
@@ -455,7 +455,7 @@
       "retries_used": 1,
       "has_repair_step": true,
       "recovered_and_matched": true,
-      "latency_ms": 6.91
+      "latency_ms": 4.54
     },
     {
       "id": "T11",
@@ -464,7 +464,7 @@
       "retries_used": 1,
       "has_repair_step": true,
       "recovered_and_matched": true,
-      "latency_ms": 7.06
+      "latency_ms": 5.03
     },
     {
       "id": "T15",
@@ -473,7 +473,7 @@
       "retries_used": 1,
       "has_repair_step": true,
       "recovered_and_matched": true,
-      "latency_ms": 6.9
+      "latency_ms": 4.63
     },
     {
       "id": "T17",
@@ -482,7 +482,7 @@
       "retries_used": 1,
       "has_repair_step": true,
       "recovered_and_matched": true,
-      "latency_ms": 7.6
+      "latency_ms": 5.05
     },
     {
       "id": "T21",
@@ -491,7 +491,7 @@
       "retries_used": 1,
       "has_repair_step": true,
       "recovered_and_matched": true,
-      "latency_ms": 7.05
+      "latency_ms": 4.91
     }
   ]
 }

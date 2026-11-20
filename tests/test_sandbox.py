@@ -34,6 +34,14 @@ from sql_analyst.sandbox import (
         "SELECT * FROM orders; DROP TABLE customers",
         "SELECT 1; DELETE FROM order_items;",
         "WITH cte AS (SELECT 1) DELETE FROM orders",
+        "WITH cte AS (SELECT 1) UPDATE orders SET status = 'completed'",
+        "WITH cte AS (SELECT 1) INSERT INTO warehouses (warehouse_id) VALUES (99)",
+        "SELECT * FROM pragma_database_list",
+        "SELECT * FROM pragma_table_info('orders')",
+        "ANALYZE orders",
+        "SELECT 1\x00; DROP TABLE orders",
+        "SELECT 'unterminated; DROP TABLE orders",
+        'SELECT "unterminated FROM orders',
         "/* unclosed comment SELECT 1",
         "   ",
         "-- only a comment",
@@ -53,6 +61,7 @@ def test_static_validator_blocks_unsafe_sql(dangerous_sql: str) -> None:
         "WITH rev AS (SELECT warehouse_id, SUM(total_amount) AS rev FROM orders GROUP BY warehouse_id) SELECT * FROM rev",
         "-- Monthly count\nSELECT strftime('%Y-%m', order_date) AS m, COUNT(*) FROM orders /* safe */ GROUP BY m",
         "SELECT 'DROP TABLE; DELETE FROM orders' AS harmless_literal, COUNT(*) FROM warehouses",
+        "\ufeffSELECT COUNT(*) AS bom_prefixed FROM warehouses;",
     ],
 )
 def test_static_validator_allows_safe_readonly_sql(safe_sql: str) -> None:
@@ -69,6 +78,16 @@ def test_runtime_sandbox_enforces_security_and_row_cap(seeded_db: Path) -> None:
     assert res.row_count == 15
     assert res.truncated is True
     assert "order_id" in res.columns
+
+
+def test_runtime_sandbox_handles_special_chars_in_db_path(tmp_path: Path) -> None:
+    from sql_analyst.database import seed_database
+
+    special_dir = tmp_path / "analytics #1"
+    special_dir.mkdir()
+    db_file = seed_database(special_dir / "my store.db", force=True, seed=42)
+    res = execute_readonly_sql(db_file, "SELECT COUNT(*) AS n FROM warehouses")
+    assert res.rows == [{"n": 5}]
 
 
 def test_runtime_sandbox_enforces_timeout(seeded_db: Path) -> None:

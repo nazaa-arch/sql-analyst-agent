@@ -3,11 +3,21 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
+import httpx
 import pytest
 
+from sql_analyst.config import Settings
 from sql_analyst.database import get_schema_context, get_schema_info
-from sql_analyst.planner import LocalSQLPlanner, detect_language
+from sql_analyst.planner import (
+    GeminiSQLPlanner,
+    LocalSQLPlanner,
+    OllamaSQLPlanner,
+    OpenAISQLPlanner,
+    _parse_json_payload,
+    detect_language,
+)
 from sql_analyst.sandbox import execute_readonly_sql, validate_sql
 
 
@@ -72,3 +82,92 @@ async def test_local_planner_repairs_sqlite_errors(seeded_db: Path) -> None:
     assert "FROM orders" in repaired_tbl.sql
     res2 = execute_readonly_sql(seeded_db, repaired_tbl.sql)
     assert res2.rows[0]["n"] == 600
+
+
+def test_parse_json_payload_handles_fences_and_prose() -> None:
+    fenced = 'Here is the plan:\n```JSON\n{"sql": "SELECT 1", "chart_type": "table"}\n```'
+    assert _parse_json_payload(fenced)["sql"] == "SELECT 1"
+
+    prose = 'Output: {"sql": "SELECT COUNT(*) FROM orders", "language": "en"} Trailing note.'
+    assert _parse_json_payload(prose)["language"] == "en"
+
+    with pytest.raises(ValueError):
+        _parse_json_payload("no json here at all")
+
+
+@pytest.mark.asyncio
+async def test_external_llm_adapters_endpoints_headers_and_model_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: list[dict[str, Any]] = []
+
+    class _MockAsyncClient:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            del args, kwargs
+
+        async def __aenter__(self) -> _MockAsyncClient:
+            return self
+
+        async def __aexit__(self, *args: Any) -> None:
+            del args
+
+        async def post(
+            self,
+            url: str,
+            json: dict[str, Any] | None = None,
+            headers: dict[str, str] | None = None,
+        ) -> httpx.Response:
+            captured.append({"url": url, "json": json, "headers": headers or {}})
+            req = httpx.Request("POST", url)
+            if "/api/chat" in url:
+                body = {"message": {"content": '{"sql": "SELECT 1", "reasoning": "ok", "chart_type": "table"}'}}
+            elif ":generateContent" in url:
+                body = {
+                    "candidates": [
+                        {
+                            "content": {
+                                "parts": [
+                                    {"text": '```json\n{"sql": "SELECT 2", "reasoning": "ok", "chart_type": "table"}\n```'}
+                                ]
+                            }
+                        }
+                    ]
+                }
+            else:
+                body = {
+                    "choices": [
+                        {"message": {"content": '{"sql": "SELECT 3", "reasoning": "ok", "chart_type": "table"}'}}
+                    ]
+                }
+            return httpx.Response(200, json=body, request=req)
+
+    monkeypatch.setattr(httpx, "AsyncClient", _MockAsyncClient)
+
+    # Default settings have provider="local" & model="deterministic-bilingual-v1"
+    # Verify provider-override resolves proper default models and never puts Gemini key in URL!
+    cfg = Settings(
+        provider="local",
+        model="deterministic-bilingual-v1",
+        ollama_base_url="http://localhost:11434",
+        gemini_api_key="test-gemini-secret",
+        openai_api_key="test-openai-secret",
+    )
+
+    ollama_plan = await OllamaSQLPlanner(cfg).plan("Count orders", "-- ddl", [])
+    assert ollama_plan.sql == "SELECT 1"
+    assert captured[-1]["url"] == "http://localhost:11434/api/chat"
+    assert captured[-1]["json"]["model"] == "qwen2.5-coder:7b"
+
+    gemini_plan = await GeminiSQLPlanner(cfg).plan("Count orders", "-- ddl", [])
+    assert gemini_plan.sql == "SELECT 2"
+    assert captured[-1]["url"] == (
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+    )
+    assert "key=" not in captured[-1]["url"]
+    assert captured[-1]["headers"]["x-goog-api-key"] == "test-gemini-secret"
+
+    openai_plan = await OpenAISQLPlanner(cfg).plan("Count orders", "-- ddl", [])
+    assert openai_plan.sql == "SELECT 3"
+    assert captured[-1]["url"] == "https://api.openai.com/v1/chat/completions"
+    assert captured[-1]["json"]["model"] == "gpt-4o-mini"
+    assert captured[-1]["headers"]["Authorization"] == "Bearer test-openai-secret"

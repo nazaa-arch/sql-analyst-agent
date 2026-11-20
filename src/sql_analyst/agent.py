@@ -7,7 +7,7 @@ import time
 from typing import Any
 
 from sql_analyst.config import Settings
-from sql_analyst.database import ensure_database, get_schema_context, get_schema_info
+from sql_analyst.database import get_schema_context, get_schema_info
 from sql_analyst.planner import BaseSQLPlanner, create_planner, detect_language
 from sql_analyst.sandbox import (
     SQLExecutionError,
@@ -340,7 +340,6 @@ class SQLAnalystAgent:
     ) -> None:
         self.settings = settings
         self._planner = planner
-        ensure_database(self.settings.db_path)
 
     async def ask(
         self,
@@ -390,7 +389,11 @@ class SQLAnalystAgent:
         t0 = time.perf_counter()
         schema_info = get_schema_info(self.settings.db_path, sample_limit=2)
         selected_tables = _select_relevant_tables(question, schema_info.tables)
-        schema_context = get_schema_context(self.settings.db_path, selected_tables=selected_tables)
+        schema_context = get_schema_context(
+            self.settings.db_path,
+            selected_tables=selected_tables,
+            schema_info=schema_info,
+        )
         _record(
             "inspect_schema",
             "ok",

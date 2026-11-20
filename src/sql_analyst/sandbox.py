@@ -37,6 +37,24 @@ FORBIDDEN_KEYWORDS: frozenset[str] = frozenset(
         "EXECUTE",
         "MERGE",
         "UPSERT",
+        "ANALYZE",
+        "FTS3_TOKENIZER",
+    }
+)
+
+_FORBIDDEN_FUNCTIONS: frozenset[str] = frozenset(
+    {
+        "load_extension",
+        "fts3_tokenizer",
+    }
+)
+
+_ALLOWED_AUTHORIZER_ACTIONS: frozenset[int] = frozenset(
+    {
+        sqlite3.SQLITE_SELECT,
+        sqlite3.SQLITE_READ,
+        sqlite3.SQLITE_FUNCTION,
+        sqlite3.SQLITE_RECURSIVE,
     }
 )
 
@@ -65,17 +83,18 @@ class SQLExecutionError(Exception):
     """Raised when SQLite fails to execute a validated read-only query."""
 
 
-def _strip_comments_and_extract_code(sql: str) -> tuple[str, str, bool]:
+def _strip_comments_and_extract_code(sql: str) -> tuple[str, str, bool, bool]:
     """Strip SQL comments while preserving string literals.
 
     Returns:
-        (normalized_sql, code_without_literals, has_unclosed_comment)
+        (normalized_sql, code_without_literals, has_unclosed_comment, has_unclosed_quote)
     """
     n = len(sql)
     i = 0
     out_chars: list[str] = []
     code_chars: list[str] = []
     unclosed_comment = False
+    unclosed_quote = False
 
     while i < n:
         ch = sql[i]
@@ -112,6 +131,7 @@ def _strip_comments_and_extract_code(sql: str) -> tuple[str, str, bool]:
             out_chars.append(ch)
             code_chars.append(" ")
             i += 1
+            closed_str = False
             while i < n:
                 out_chars.append(sql[i])
                 if sql[i] == "'":
@@ -120,8 +140,12 @@ def _strip_comments_and_extract_code(sql: str) -> tuple[str, str, bool]:
                         i += 2
                         continue
                     i += 1
+                    closed_str = True
                     break
                 i += 1
+            if not closed_str:
+                unclosed_quote = True
+                break
             continue
 
         # Double-quoted identifier ("...")
@@ -129,6 +153,7 @@ def _strip_comments_and_extract_code(sql: str) -> tuple[str, str, bool]:
             out_chars.append(ch)
             code_chars.append(ch)
             i += 1
+            closed_ident = False
             while i < n:
                 out_chars.append(sql[i])
                 code_chars.append(sql[i])
@@ -139,8 +164,12 @@ def _strip_comments_and_extract_code(sql: str) -> tuple[str, str, bool]:
                         i += 2
                         continue
                     i += 1
+                    closed_ident = True
                     break
                 i += 1
+            if not closed_ident:
+                unclosed_quote = True
+                break
             continue
 
         out_chars.append(ch)
@@ -149,7 +178,25 @@ def _strip_comments_and_extract_code(sql: str) -> tuple[str, str, bool]:
 
     normalized = " ".join("".join(out_chars).split()).strip()
     code_only = "".join(code_chars)
-    return normalized, code_only, unclosed_comment
+    return normalized, code_only, unclosed_comment, unclosed_quote
+
+
+def _readonly_authorizer(
+    action_code: int,
+    arg1: str | None,
+    arg2: str | None,
+    db_name: str | None,
+    trigger_name: str | None,
+) -> int:
+    """SQLite C-level authorizer callback restricting execution strictly to read-only operations."""
+    del arg1, db_name, trigger_name
+    if action_code == sqlite3.SQLITE_FUNCTION:
+        if (arg2 or "").lower() in _FORBIDDEN_FUNCTIONS:
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+    if action_code in _ALLOWED_AUTHORIZER_ACTIONS:
+        return sqlite3.SQLITE_OK
+    return sqlite3.SQLITE_DENY
 
 
 def validate_sql(sql: str) -> ValidationResult:
@@ -162,11 +209,25 @@ def validate_sql(sql: str) -> ValidationResult:
             statement_type="EMPTY",
         )
 
-    normalized, code_only, unclosed_comment = _strip_comments_and_extract_code(sql)
+    if "\x00" in sql:
+        return ValidationResult(
+            is_valid=False,
+            normalized_sql="",
+            blocked_reasons=["Null bytes are not allowed in SQL statements."],
+            statement_type="INVALID",
+        )
+
+    cleaned_input = sql.lstrip("\ufeff")
+    normalized, code_only, unclosed_comment, unclosed_quote = _strip_comments_and_extract_code(
+        cleaned_input
+    )
     reasons: list[str] = []
 
     if unclosed_comment:
         reasons.append("Unclosed block comment detected.")
+
+    if unclosed_quote:
+        reasons.append("Unclosed string literal or quoted identifier detected.")
 
     if not normalized:
         reasons.append("SQL statement is empty after stripping comments.")
@@ -201,8 +262,10 @@ def validate_sql(sql: str) -> ValidationResult:
     elif statement_type == "WITH" and "SELECT" not in tokens:
         reasons.append("WITH CTE query must contain a SELECT statement.")
 
-    # Scan for forbidden DDL/DML/admin keywords anywhere in SQL code
-    found_forbidden = sorted({tok for tok in tokens if tok in FORBIDDEN_KEYWORDS})
+    # Scan for forbidden DDL/DML/admin keywords and PRAGMA_* table-valued functions
+    found_forbidden = sorted(
+        {tok for tok in tokens if tok in FORBIDDEN_KEYWORDS or tok.startswith("PRAGMA_")}
+    )
     if found_forbidden:
         reasons.append(
             f"Forbidden SQL keyword(s) detected: {', '.join(found_forbidden)}."
@@ -235,7 +298,7 @@ def execute_readonly_sql(
 
     target = Path(db_path).resolve()
     if not target.exists():
-        raise SQLExecutionError(f"Database file not found: {target}")
+        raise SQLExecutionError(f"Database file not found: {target.name}")
 
     start_ts = time.perf_counter()
     timed_out = False
@@ -248,14 +311,15 @@ def execute_readonly_sql(
         return 0
 
     conn = sqlite3.connect(
-        f"file:{target.as_posix()}?mode=ro",
+        f"{target.as_uri()}?mode=ro",
         uri=True,
         check_same_thread=False,
     )
     conn.row_factory = sqlite3.Row
     try:
-        # Runtime defense-in-depth: enforce query_only pragma + progress timeout
+        # Runtime defense-in-depth: query_only pragma + C-level authorizer + progress timeout
         conn.execute("PRAGMA query_only = ON;")
+        conn.set_authorizer(_readonly_authorizer)
         conn.set_progress_handler(_progress_handler, 500)
 
         cursor = conn.execute(validation.normalized_sql)
@@ -280,7 +344,10 @@ def execute_readonly_sql(
             ) from exc
         raise SQLExecutionError(str(exc)) from exc
     except sqlite3.DatabaseError as exc:
+        if "not authorized" in str(exc).lower():
+            raise SQLSecurityError([f"SQLite authorizer denied operation: {exc}"]) from exc
         raise SQLExecutionError(str(exc)) from exc
     finally:
+        conn.set_authorizer(None)
         conn.set_progress_handler(None, 0)
         conn.close()

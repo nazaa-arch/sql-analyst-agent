@@ -9,6 +9,8 @@ def test_studio_ui_and_health(client: TestClient) -> None:
     ui = client.get("/")
     assert ui.status_code == 200
     assert "SQL Analyst Studio" in ui.text
+    # Ensure inline onclick XSS vector on table headers is absent
+    assert "onclick=\"sortBy(" not in ui.text
 
     health = client.get("/health")
     assert health.status_code == 200
@@ -16,6 +18,8 @@ def test_studio_ui_and_health(client: TestClient) -> None:
     assert data["status"] == "ok"
     assert data["table_count"] == 6
     assert data["total_rows"] > 2000
+    # Ensure host absolute path is not leaked in API responses
+    assert "/" not in data["db_path"] and "\\" not in data["db_path"]
 
 
 def test_schema_endpoint(client: TestClient) -> None:
@@ -93,3 +97,22 @@ def test_eval_latest_endpoint(client: TestClient) -> None:
     body = resp.json()
     assert body["available"] is True
     assert body["report"]["metrics"]["safety_block_rate_pct"] == 100.0
+
+
+def test_api_rejects_whitespace_inputs_with_422(client: TestClient) -> None:
+    r1 = client.post("/v1/ask", json={"question": "    "})
+    assert r1.status_code == 422
+
+    r2 = client.post("/v1/validate-sql", json={"sql": "   \n\t  "})
+    assert r2.status_code == 422
+
+
+def test_direct_sql_with_semicolon_in_string_literal_allowed(client: TestClient) -> None:
+    resp = client.post(
+        "/v1/ask",
+        json={"question": "SELECT 'hello;world' AS note, COUNT(*) AS n FROM warehouses"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "completed"
+    assert body["execution"]["rows"] == [{"note": "hello;world", "n": 5}]

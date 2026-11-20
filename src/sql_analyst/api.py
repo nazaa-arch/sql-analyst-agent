@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from sql_analyst import __version__
@@ -26,6 +27,7 @@ from sql_analyst.schemas import (
 )
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+logger = logging.getLogger(__name__)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -53,6 +55,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     if STATIC_DIR.is_dir():
         application.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+    @application.exception_handler(Exception)
+    async def unhandled_exception_handler(_request: Request, exc: Exception) -> JSONResponse:
+        logger.exception("Unhandled error while processing API request: %s", exc)
+        return JSONResponse(status_code=500, content={"detail": "Internal server error."})
 
     @application.get("/", include_in_schema=False)
     async def studio_ui() -> FileResponse:
@@ -102,7 +109,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "available": False,
                 "message": "No evaluation report found yet. Run `python eval/run_eval.py` to generate one.",
             }
-        data = json.loads(report_path.read_text(encoding="utf-8"))
+        try:
+            data = json.loads(report_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("Failed to read evaluation report: %s", exc)
+            raise HTTPException(
+                status_code=500,
+                detail="Evaluation report could not be parsed.",
+            ) from None
         return {"available": True, "report": data}
 
     return application

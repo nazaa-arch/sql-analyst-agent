@@ -614,17 +614,36 @@
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;");
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
     }
 
+    const ALLOWED_STEP_STATUSES = new Set(["ok", "warning", "error", "blocked"]);
+
     function highlightSQL(sql) {
-      let safe = escapeHtml(sql);
-      const keywords = /\b(SELECT|FROM|WHERE|JOIN|LEFT|RIGHT|INNER|ON|GROUP BY|ORDER BY|LIMIT|AS|AND|OR|IN|NOT|CASE|WHEN|THEN|ELSE|END|WITH|DISTINCT|ASC|DESC|HAVING)\b/gi;
-      const funcs = /\b(SUM|COUNT|AVG|MIN|MAX|ROUND|CAST|strftime|COALESCE)\b/gi;
-      safe = safe.replace(/'([^']*)'/g, "<span class='sql-str'>'$1'</span>");
-      safe = safe.replace(keywords, "<span class='sql-kw'>$1</span>");
-      safe = safe.replace(funcs, "<span class='sql-fn'>$1</span>");
-      return safe;
+      const tokenRe = /'(?:''|[^'])*'|\b(?:GROUP\s+BY|ORDER\s+BY|SELECT|FROM|WHERE|JOIN|LEFT|RIGHT|INNER|ON|LIMIT|AS|AND|OR|IN|NOT|CASE|WHEN|THEN|ELSE|END|WITH|DISTINCT|ASC|DESC|HAVING)\b|\b(?:SUM|COUNT|AVG|MIN|MAX|ROUND|CAST|strftime|COALESCE)\b/gi;
+      const funcRe = /^(?:SUM|COUNT|AVG|MIN|MAX|ROUND|CAST|strftime|COALESCE)$/i;
+      let result = "";
+      let lastIdx = 0;
+      for (const match of String(sql).matchAll(tokenRe)) {
+        const idx = match.index ?? 0;
+        if (idx > lastIdx) {
+          result += escapeHtml(sql.slice(lastIdx, idx));
+        }
+        const tok = match[0];
+        if (tok.startsWith("'")) {
+          result += `<span class="sql-str">${escapeHtml(tok)}</span>`;
+        } else if (funcRe.test(tok)) {
+          result += `<span class="sql-fn">${escapeHtml(tok)}</span>`;
+        } else {
+          result += `<span class="sql-kw">${escapeHtml(tok)}</span>`;
+        }
+        lastIdx = idx + tok.length;
+      }
+      if (lastIdx < sql.length) {
+        result += escapeHtml(sql.slice(lastIdx));
+      }
+      return result;
     }
 
     function usePrompt(text) {
@@ -669,12 +688,15 @@
           return `<div class="col-row"><span>${badge}${escapeHtml(c.name)}</span><span class="col-type">${escapeHtml(c.data_type)}</span></div>`;
         }).join("");
         div.innerHTML = `
-          <div class="schema-header" onclick="this.parentElement.classList.toggle('open')">
+          <div class="schema-header">
             <span>${escapeHtml(tbl.name)}</span>
-            <span style="font-size:11px;color:var(--muted)">${tbl.row_count.toLocaleString()} rows</span>
+            <span style="font-size:11px;color:var(--muted)">${Number(tbl.row_count || 0).toLocaleString()} rows</span>
           </div>
           <div class="schema-cols">${colsHtml}</div>
         `;
+        div.querySelector(".schema-header").addEventListener("click", () => {
+          div.classList.toggle("open");
+        });
         container.appendChild(div);
       });
     }
@@ -725,14 +747,34 @@
             simulate_initial_error: document.getElementById("simulate-error").checked
           })
         });
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const detail = typeof data.detail === "string"
+            ? data.detail
+            : `HTTP ${res.status} error while processing request.`;
+          renderRequestError(detail);
+          return;
+        }
         renderResponse(data);
       } catch (err) {
-        alert("Request failed: " + err.message);
+        renderRequestError("Request failed: " + (err && err.message ? err.message : String(err)));
       } finally {
         btn.disabled = false;
         btn.textContent = "Run Analysis";
       }
+    }
+
+    function renderRequestError(message) {
+      const sumCard = document.getElementById("result-summary-card");
+      sumCard.classList.remove("hidden");
+      const statusPill = document.getElementById("status-pill");
+      statusPill.textContent = "ERROR";
+      statusPill.className = "pill blocked";
+      document.getElementById("summary-text").textContent = message;
+      document.getElementById("kpi-grid").innerHTML = "";
+      document.getElementById("viz-sql-grid").classList.add("hidden");
+      document.getElementById("table-card").classList.add("hidden");
+      document.getElementById("trace-card").classList.add("hidden");
     }
 
     function renderResponse(data) {
@@ -782,14 +824,17 @@
       traceCard.classList.remove("hidden");
       document.getElementById("trace-meta").textContent =
         `${data.trace.length} steps • ${data.total_latency_ms.toFixed(2)} ms`;
-      document.getElementById("trace-list").innerHTML = data.trace.map(s => `
+      document.getElementById("trace-list").innerHTML = (data.trace || []).map(s => {
+        const statusCls = ALLOWED_STEP_STATUSES.has(s.status) ? s.status : "error";
+        return `
         <div class="trace-step">
-          <div class="step-num ${escapeHtml(s.status)}">${s.step_number}</div>
+          <div class="step-num ${statusCls}">${escapeHtml(s.step_number)}</div>
           <div class="step-name">${escapeHtml(s.step_name)}</div>
           <div class="step-msg">${escapeHtml(s.summary)}</div>
-          <div class="step-ms">${s.latency_ms.toFixed(2)} ms</div>
+          <div class="step-ms">${Number(s.latency_ms || 0).toFixed(2)} ms</div>
         </div>
-      `).join("");
+      `;
+      }).join("");
     }
 
     function renderChart(spec) {
@@ -816,6 +861,9 @@
         // Offline graceful canvas fallback
         const ctx = canvas.getContext("2d");
         ctx.clearRect(0, 0, canvas.width, canvas.height);
+        if (!spec.datasets || spec.datasets.length === 0 || !spec.datasets[0].data.length) {
+          return;
+        }
         const vals = spec.datasets[0].data;
         const maxV = Math.max(...vals, 1);
         const barW = Math.max(18, (canvas.width - 40) / vals.length - 8);
@@ -860,21 +908,35 @@
       const thead = document.querySelector("#result-table thead");
       const tbody = document.querySelector("#result-table tbody");
 
-      thead.innerHTML = "<tr>" + lastCols.map(c => {
+      thead.innerHTML = "";
+      const headRow = document.createElement("tr");
+      lastCols.forEach(c => {
+        const th = document.createElement("th");
         const arrow = sortState.col === c ? (sortState.asc ? " ▲" : " ▼") : "";
-        return `<th onclick="sortBy('${escapeHtml(c)}')">${escapeHtml(c)}${arrow}</th>`;
-      }).join("") + "</tr>";
+        th.textContent = `${c}${arrow}`;
+        th.addEventListener("click", () => sortBy(c));
+        headRow.appendChild(th);
+      });
+      thead.appendChild(headRow);
 
-      tbody.innerHTML = lastRows.map(row => {
-        return "<tr>" + lastCols.map(c => {
+      tbody.innerHTML = "";
+      lastRows.forEach(row => {
+        const tr = document.createElement("tr");
+        lastCols.forEach(c => {
+          const td = document.createElement("td");
           const v = row[c];
           if (typeof v === "number") {
-            const fmt = Number.isInteger(v) ? v.toLocaleString() : v.toLocaleString(undefined, { maximumFractionDigits: 2 });
-            return `<td class="num">${fmt}</td>`;
+            td.className = "num";
+            td.textContent = Number.isInteger(v)
+              ? v.toLocaleString()
+              : v.toLocaleString(undefined, { maximumFractionDigits: 2 });
+          } else {
+            td.textContent = v == null ? "" : String(v);
           }
-          return `<td>${escapeHtml(v ?? "")}</td>`;
-        }).join("") + "</tr>";
-      }).join("");
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
     }
 
     function sortBy(col) {
@@ -896,16 +958,25 @@
       renderTable();
     }
 
-    function copySQL() {
+    async function copySQL() {
       if (!lastSQL) return;
-      navigator.clipboard.writeText(lastSQL);
+      try {
+        await navigator.clipboard.writeText(lastSQL);
+      } catch (_) {
+        // Clipboard API may be unavailable on non-HTTPS origins
+      }
+    }
+
+    function csvCell(val) {
+      const str = val == null ? "" : String(val);
+      return `"${str.replace(/"/g, '""')}"`;
     }
 
     function exportCSV() {
       if (!lastCols.length) return;
       const lines = [
-        lastCols.join(","),
-        ...lastRows.map(r => lastCols.map(c => JSON.stringify(r[c] ?? "")).join(","))
+        lastCols.map(csvCell).join(","),
+        ...lastRows.map(r => lastCols.map(c => csvCell(r[c])).join(","))
       ];
       const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);

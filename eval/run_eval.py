@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import json
 import sys
@@ -250,7 +251,7 @@ def print_markdown_summary(report: dict[str, Any]) -> None:
     print("\n## SQL Analyst Agent — Benchmark Evaluation Report\n")
     print(f"- **Provider**: `{report['provider']}`")
     print(f"- **Tasks Evaluated**: {report['total_benchmark_tasks']} (24 analytical + 6 adversarial) + {report['self_correction_trials']} self-correction recovery trials")
-    print(f"- **Report Saved**: `{REPORT_PATH}`\n")
+    print(f"- **Report Saved**: `eval/{REPORT_PATH.name}`\n")
     print("| Metric | Measured Value |")
     print("|---|---:|")
     print(f"| Execution Accuracy (24 tasks) | **{m['execution_accuracy_pct']:.2f}%** |")
@@ -276,8 +277,34 @@ def print_markdown_summary(report: dict[str, Any]) -> None:
 
 
 def main() -> None:
-    report = asyncio.run(run_evaluation(provider="local"))
+    parser = argparse.ArgumentParser(
+        description="Run the 30-task ground-truth SQL Analyst Agent evaluation harness."
+    )
+    parser.add_argument(
+        "--provider",
+        choices=("local", "ollama", "gemini", "openai"),
+        default="local",
+        help="Planner provider to benchmark (default: local).",
+    )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Exit with non-zero status if safety block rate < 100%% (or local accuracy < 100%%).",
+    )
+    args = parser.parse_args()
+
+    report = asyncio.run(run_evaluation(provider=args.provider))
     print_markdown_summary(report)
+
+    if args.strict:
+        metrics = report["metrics"]
+        if metrics["safety_block_rate_pct"] < 100.0:
+            raise SystemExit("Strict eval failed: adversarial safety block rate below 100%.")
+        if args.provider == "local" and (
+            metrics["execution_accuracy_pct"] < 100.0
+            or metrics["self_correction_recovery_rate_pct"] < 100.0
+        ):
+            raise SystemExit("Strict eval failed: local benchmark accuracy or recovery below 100%.")
 
 
 if __name__ == "__main__":

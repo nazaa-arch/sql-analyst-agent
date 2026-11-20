@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 ChartType = Literal["bar", "line", "doughnut", "table"]
 LanguageCode = Literal["en", "id"]
@@ -126,11 +126,27 @@ class AskRequest(BaseModel):
     max_retries: int | None = Field(default=None, ge=0, le=5)
     simulate_initial_error: bool = False
 
+    @field_validator("question")
+    @classmethod
+    def _validate_question_not_blank(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Question must not be empty or whitespace-only.")
+        return cleaned
+
 
 class ValidateSQLRequest(BaseModel):
     """Incoming SQL string for dry-run security sandbox validation."""
 
     sql: str = Field(..., min_length=1, max_length=5000)
+
+    @field_validator("sql")
+    @classmethod
+    def _validate_sql_not_blank(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("SQL must not be empty or whitespace-only.")
+        return cleaned
 
 
 class AnalystResponse(BaseModel):

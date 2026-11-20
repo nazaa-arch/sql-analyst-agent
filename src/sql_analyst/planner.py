@@ -10,6 +10,7 @@ from typing import Any
 import httpx
 
 from sql_analyst.config import Settings
+from sql_analyst.sandbox import validate_sql
 from sql_analyst.schemas import ChartType, LanguageCode, SQLPlan, TableSchema
 
 INDONESIAN_MARKERS: frozenset[str] = frozenset(
@@ -180,17 +181,21 @@ def _extract_explicit_status(q: str) -> str | None:
 
 
 def _parse_json_payload(raw_text: str) -> dict[str, Any]:
-    """Parse JSON from an LLM response, stripping optional markdown fences."""
+    """Parse JSON from an LLM response, stripping optional markdown fences or surrounding prose."""
     cleaned = raw_text.strip()
-    fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", cleaned, re.DOTALL)
+    fence_match = re.search(r"```(?:json)?\s*(.*?)\s*```", cleaned, re.DOTALL | re.IGNORECASE)
     if fence_match:
-        cleaned = fence_match.group(1)
-    else:
+        cleaned = fence_match.group(1).strip()
+
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError:
         brace_start = cleaned.find("{")
-        brace_end = cleaned.rfind("}")
-        if brace_start != -1 and brace_end != -1 and brace_end > brace_start:
-            cleaned = cleaned[brace_start : brace_end + 1]
-    data = json.loads(cleaned)
+        if brace_start == -1:
+            raise ValueError("Planner response did not contain a JSON object.") from None
+        decoder = json.JSONDecoder()
+        data, _ = decoder.raw_decode(cleaned, brace_start)
+
     if not isinstance(data, dict):
         raise ValueError("Planner JSON payload must be an object.")
     return data
@@ -238,7 +243,30 @@ class LocalSQLPlanner(BaseSQLPlanner):
         q = q_raw.lower()
         lang = detect_language(q_raw)
 
-        # 1. Check raw dangerous SQL or stacked injection attempts first
+        # 1. Direct SQL input starting with SELECT / WITH (delegate quote-aware check to sandbox)
+        if re.match(r"^\s*(?:--[^\n]*\n\s*|/\*.*?\*/\s*)*(SELECT|WITH)\b", q_raw, re.IGNORECASE | re.DOTALL):
+            val = validate_sql(q_raw)
+            if not val.is_valid:
+                return SQLPlan(
+                    reasoning="Detected unsafe or multi-statement SQL in user input; forwarding to strict sandbox validator for enforcement.",
+                    sql=q_raw,
+                    chart_type="table",
+                    selected_tables=[],
+                    language=lang,
+                    intent="unsafe_sql",
+                    is_unsafe_request=True,
+                    unsafe_reason="; ".join(val.blocked_reasons),
+                )
+            return SQLPlan(
+                reasoning="Direct read-only SQL query provided by analyst; routing through security sandbox.",
+                sql=q_raw,
+                chart_type="table",
+                selected_tables=val.tables_referenced,
+                language=lang,
+                intent="direct_sql",
+            )
+
+        # 2. Check raw dangerous SQL or stacked injection attempts
         if RAW_UNSAFE_SQL_RE.search(q_raw) or (";" in q_raw and re.search(r";\s*\w+", q_raw)):
             return SQLPlan(
                 reasoning="Detected potentially unsafe or multi-statement SQL in user input; forwarding to strict sandbox validator for enforcement.",
@@ -251,7 +279,7 @@ class LocalSQLPlanner(BaseSQLPlanner):
                 unsafe_reason="Raw destructive, administrative, or stacked SQL detected in prompt.",
             )
 
-        # 2. Check natural-language destructive/write requests (ID & EN)
+        # 3. Check natural-language destructive/write requests (ID & EN)
         for pattern, synth_sql, reason in DESTRUCTIVE_NL_PATTERNS:
             if pattern.search(q_raw):
                 return SQLPlan(
@@ -264,17 +292,6 @@ class LocalSQLPlanner(BaseSQLPlanner):
                     is_unsafe_request=True,
                     unsafe_reason=reason,
                 )
-
-        # 3. Direct read-only SQL pass-through (if user typed a SELECT / WITH query directly)
-        if re.match(r"^\s*(SELECT|WITH)\b", q_raw, re.IGNORECASE):
-            return SQLPlan(
-                reasoning="Direct read-only SQL query provided by analyst; routing through security sandbox.",
-                sql=q_raw,
-                chart_type="table",
-                selected_tables=[],
-                language=lang,
-                intent="direct_sql",
-            )
 
         # Extract common query modifiers
         top_n = _extract_top_n(q, default=5)
@@ -1013,8 +1030,21 @@ ORDER BY total_revenue DESC, p.category ASC
 class _ExternalLLMPlanner(BaseSQLPlanner):
     """Shared structured-output prompt and repair flow for external LLM providers."""
 
+    default_model: str = ""
+
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+
+    def _resolve_model(self) -> str:
+        """Select provider-compatible model even when provider is overridden at request time."""
+        configured = (self.settings.model or "").strip()
+        if (
+            self.settings.provider == self.provider_name
+            and configured
+            and configured != "deterministic-bilingual-v1"
+        ):
+            return configured
+        return self.default_model
 
     @abstractmethod
     async def _complete_json(self, system_prompt: str, user_prompt: str) -> str:
@@ -1077,11 +1107,12 @@ class OllamaSQLPlanner(_ExternalLLMPlanner):
     """Async Ollama /api/chat adapter with JSON structured output."""
 
     provider_name: str = "ollama"
+    default_model: str = "qwen2.5-coder:7b"
 
     async def _complete_json(self, system_prompt: str, user_prompt: str) -> str:
         url = f"{self.settings.ollama_base_url.rstrip('/')}/api/chat"
         payload = {
-            "model": self.settings.model,
+            "model": self._resolve_model(),
             "format": "json",
             "stream": False,
             "messages": [
@@ -1090,28 +1121,43 @@ class OllamaSQLPlanner(_ExternalLLMPlanner):
             ],
             "options": {"temperature": 0.0},
         }
-        async with httpx.AsyncClient(timeout=self.settings.request_timeout_sec) as client:
-            resp = await client.post(url, json=payload)
-            resp.raise_for_status()
-            body = resp.json()
-            return str(body["message"]["content"])
+        try:
+            async with httpx.AsyncClient(timeout=self.settings.request_timeout_sec) as client:
+                resp = await client.post(url, json=payload)
+                resp.raise_for_status()
+                body = resp.json()
+        except httpx.HTTPStatusError as exc:
+            raise RuntimeError(
+                f"Ollama API returned HTTP {exc.response.status_code}."
+            ) from None
+        except httpx.RequestError as exc:
+            raise RuntimeError(
+                f"Failed to reach Ollama server: {exc.__class__.__name__}."
+            ) from None
+
+        content = body.get("message", {}).get("content") if isinstance(body, dict) else None
+        if not content:
+            raise RuntimeError("Ollama response did not contain message.content.")
+        return str(content)
 
 
 class GeminiSQLPlanner(_ExternalLLMPlanner):
     """Async Google Gemini generateContent adapter with JSON mime type."""
 
     provider_name: str = "gemini"
+    default_model: str = "gemini-2.0-flash"
 
     async def _complete_json(self, system_prompt: str, user_prompt: str) -> str:
         if not self.settings.gemini_api_key:
             raise RuntimeError(
                 "AGENT_GEMINI_API_KEY is not configured. Set it in .env or switch provider to 'local'."
             )
-        model = self.settings.model or "gemini-2.0-flash"
-        url = (
-            f"https://generativelanguage.googleapis.com/v1beta/models/"
-            f"{model}:generateContent?key={self.settings.gemini_api_key}"
-        )
+        model = self._resolve_model()
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+        headers = {
+            "x-goog-api-key": self.settings.gemini_api_key,
+            "Content-Type": "application/json",
+        }
         payload = {
             "systemInstruction": {"parts": [{"text": system_prompt}]},
             "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
@@ -1120,17 +1166,35 @@ class GeminiSQLPlanner(_ExternalLLMPlanner):
                 "responseMimeType": "application/json",
             },
         }
-        async with httpx.AsyncClient(timeout=self.settings.request_timeout_sec) as client:
-            resp = await client.post(url, json=payload)
-            resp.raise_for_status()
-            body = resp.json()
-            return str(body["candidates"][0]["content"]["parts"][0]["text"])
+        try:
+            async with httpx.AsyncClient(timeout=self.settings.request_timeout_sec) as client:
+                resp = await client.post(url, json=payload, headers=headers)
+                resp.raise_for_status()
+                body = resp.json()
+        except httpx.HTTPStatusError as exc:
+            raise RuntimeError(
+                f"Gemini API returned HTTP {exc.response.status_code}."
+            ) from None
+        except httpx.RequestError as exc:
+            raise RuntimeError(
+                f"Failed to reach Gemini API: {exc.__class__.__name__}."
+            ) from None
+
+        candidates = body.get("candidates") if isinstance(body, dict) else None
+        if not candidates:
+            raise RuntimeError("Gemini response did not return any candidates.")
+        parts = candidates[0].get("content", {}).get("parts", [])
+        text = "".join(str(p.get("text", "")) for p in parts if isinstance(p, dict)).strip()
+        if not text:
+            raise RuntimeError("Gemini response candidate contained empty text.")
+        return text
 
 
 class OpenAISQLPlanner(_ExternalLLMPlanner):
     """Async OpenAI-compatible /chat/completions adapter with JSON object mode."""
 
     provider_name: str = "openai"
+    default_model: str = "gpt-4o-mini"
 
     async def _complete_json(self, system_prompt: str, user_prompt: str) -> str:
         if not self.settings.openai_api_key:
@@ -1138,9 +1202,12 @@ class OpenAISQLPlanner(_ExternalLLMPlanner):
                 "AGENT_OPENAI_API_KEY is not configured. Set it in .env or switch provider to 'local'."
             )
         url = f"{self.settings.openai_base_url.rstrip('/')}/chat/completions"
-        headers = {"Authorization": f"Bearer {self.settings.openai_api_key}"}
+        headers = {
+            "Authorization": f"Bearer {self.settings.openai_api_key}",
+            "Content-Type": "application/json",
+        }
         payload = {
-            "model": self.settings.model or "gpt-4o-mini",
+            "model": self._resolve_model(),
             "temperature": 0.0,
             "response_format": {"type": "json_object"},
             "messages": [
@@ -1148,11 +1215,27 @@ class OpenAISQLPlanner(_ExternalLLMPlanner):
                 {"role": "user", "content": user_prompt},
             ],
         }
-        async with httpx.AsyncClient(timeout=self.settings.request_timeout_sec) as client:
-            resp = await client.post(url, json=payload, headers=headers)
-            resp.raise_for_status()
-            body = resp.json()
-            return str(body["choices"][0]["message"]["content"])
+        try:
+            async with httpx.AsyncClient(timeout=self.settings.request_timeout_sec) as client:
+                resp = await client.post(url, json=payload, headers=headers)
+                resp.raise_for_status()
+                body = resp.json()
+        except httpx.HTTPStatusError as exc:
+            raise RuntimeError(
+                f"OpenAI API returned HTTP {exc.response.status_code}."
+            ) from None
+        except httpx.RequestError as exc:
+            raise RuntimeError(
+                f"Failed to reach OpenAI API: {exc.__class__.__name__}."
+            ) from None
+
+        choices = body.get("choices") if isinstance(body, dict) else None
+        if not choices:
+            raise RuntimeError("OpenAI response did not return any choices.")
+        content = choices[0].get("message", {}).get("content")
+        if not content:
+            raise RuntimeError("OpenAI response message contained empty content.")
+        return str(content)
 
 
 def create_planner(settings: Settings, provider_override: str | None = None) -> BaseSQLPlanner:

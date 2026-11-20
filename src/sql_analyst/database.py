@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import random
 import sqlite3
+from contextlib import closing
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
@@ -212,14 +213,21 @@ def seed_database(db_path: str | Path, force: bool = False, seed: int = 42) -> P
     target.parent.mkdir(parents=True, exist_ok=True)
 
     if target.exists() and not force:
-        with sqlite3.connect(target) as conn:
-            row = conn.execute(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='orders'"
-            ).fetchone()
-            if row and row[0] == 1:
-                cnt = conn.execute("SELECT COUNT(*) FROM orders").fetchone()[0]
-                if cnt >= 600:
-                    return target
+        is_valid_seed = False
+        try:
+            with closing(sqlite3.connect(target)) as conn:
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='orders'"
+                ).fetchone()
+                if row and row[0] == 1:
+                    cnt = conn.execute("SELECT COUNT(*) FROM orders").fetchone()[0]
+                    if cnt >= 600:
+                        is_valid_seed = True
+        except sqlite3.DatabaseError:
+            is_valid_seed = False
+        if is_valid_seed:
+            return target
+        target.unlink()
 
     if target.exists() and force:
         target.unlink()
@@ -427,9 +435,10 @@ def ensure_database(db_path: str | Path) -> Path:
 def get_schema_info(db_path: str | Path, sample_limit: int = 3) -> DatabaseSchemaResponse:
     """Introspect tables, columns, foreign keys, row counts, DDL, and sample rows."""
     target = ensure_database(db_path).resolve()
-    conn = sqlite3.connect(f"file:{target.as_posix()}?mode=ro", uri=True)
+    conn = sqlite3.connect(f"{target.as_uri()}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     try:
+        conn.execute("PRAGMA query_only = ON;")
         table_rows = conn.execute(
             """
             SELECT name, sql
@@ -444,16 +453,17 @@ def get_schema_info(db_path: str | Path, sample_limit: int = 3) -> DatabaseSchem
 
         for trow in table_rows:
             tname = trow["name"]
+            quoted_tname = tname.replace('"', '""')
             ddl = trow["sql"] or ""
-            row_count = int(conn.execute(f'SELECT COUNT(*) FROM "{tname}"').fetchone()[0])
+            row_count = int(conn.execute(f'SELECT COUNT(*) FROM "{quoted_tname}"').fetchone()[0])
             total_rows += row_count
 
             fk_map: dict[str, str] = {}
-            for fk in conn.execute(f'PRAGMA foreign_key_list("{tname}")').fetchall():
+            for fk in conn.execute(f'PRAGMA foreign_key_list("{quoted_tname}")').fetchall():
                 fk_map[fk["from"]] = f"{fk['table']}.{fk['to']}"
 
             columns: list[ColumnSchema] = []
-            for col in conn.execute(f'PRAGMA table_info("{tname}")').fetchall():
+            for col in conn.execute(f'PRAGMA table_info("{quoted_tname}")').fetchall():
                 cname = col["name"]
                 columns.append(
                     ColumnSchema(
@@ -468,7 +478,7 @@ def get_schema_info(db_path: str | Path, sample_limit: int = 3) -> DatabaseSchem
             samples = [
                 dict(r)
                 for r in conn.execute(
-                    f'SELECT * FROM "{tname}" LIMIT ?', (sample_limit,)
+                    f'SELECT * FROM "{quoted_tname}" LIMIT ?', (sample_limit,)
                 ).fetchall()
             ]
 
@@ -483,7 +493,7 @@ def get_schema_info(db_path: str | Path, sample_limit: int = 3) -> DatabaseSchem
             )
 
         return DatabaseSchemaResponse(
-            db_path=str(target),
+            db_path=target.name,
             table_count=len(tables),
             total_rows=total_rows,
             tables=tables,
@@ -495,9 +505,10 @@ def get_schema_info(db_path: str | Path, sample_limit: int = 3) -> DatabaseSchem
 def get_schema_context(
     db_path: str | Path,
     selected_tables: list[str] | None = None,
+    schema_info: DatabaseSchemaResponse | None = None,
 ) -> str:
     """Render concise DDL, FK metadata, business definitions, and sample values for prompting."""
-    info = get_schema_info(db_path, sample_limit=2)
+    info = schema_info or get_schema_info(db_path, sample_limit=2)
     chosen = set(selected_tables) if selected_tables else None
     lines: list[str] = [
         "-- SQLite Enterprise E-Commerce & Logistics Schema",
